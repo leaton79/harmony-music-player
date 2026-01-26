@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# App bundle (built locally)
+*.app/
+
+# Database and user data (don't commit personal library)
+*.db
+library.db
+
+# Cover art cache
+cover_art/
+
+# Playback state
+playback_state.json
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Test files
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.ogg
+
+# Logs
+*.log

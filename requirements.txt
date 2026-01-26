@@ -1,0 +1,16 @@
+# Harmony Music Player - Dependencies
+
+# GUI Framework
+PyQt6>=6.4.0
+
+# Audio playback (requires mpv installed via brew)
+python-mpv>=1.0.0
+
+# Metadata reading/writing
+mutagen>=1.46.0
+
+# Global hotkeys (optional)
+pynput>=1.7.6
+
+# macOS menu bar fix
+pyobjc-framework-Cocoa>=9.0
