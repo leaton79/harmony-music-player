@@ -764,6 +764,26 @@ class MainWindow(QMainWindow):
     
     def _toggle_play(self):
         """Toggle play/pause."""
+        # If no track is currently loaded, start playing the first track from current view
+        if not self.audio_engine.get_current_track():
+            if self.current_tracks:
+                self.audio_engine.set_playlist(self.current_tracks, 0)
+                self.player_controls.update_track_info(self.current_tracks[0])
+                self.player_controls.update_play_state(True)
+                self._current_playing_id = self.current_tracks[0].get('id')
+                return
+            else:
+                # No tracks available - try to load from library
+                tracks = self.db.get_all_tracks()
+                if tracks:
+                    self.current_tracks = tracks
+                    self.audio_engine.set_playlist(tracks, 0)
+                    self.player_controls.update_track_info(tracks[0])
+                    self.player_controls.update_play_state(True)
+                    self._current_playing_id = tracks[0].get('id')
+                    return
+        
+        # Toggle play/pause if a track is loaded
         self.audio_engine.toggle_play_pause()
         self.player_controls.update_play_state(self.audio_engine.is_playing)
     
