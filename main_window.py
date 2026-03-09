@@ -172,6 +172,15 @@ class MainWindow(QMainWindow):
         self.playlist_list = QListWidget()
         self.playlist_list.setMaximumHeight(150)
         self.playlist_list.itemDoubleClicked.connect(self._on_playlist_selected)
+        # Enable context menu for playlists
+        self.playlist_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_list.customContextMenuRequested.connect(self._show_playlist_context_menu)
+        # Enable drop for drag-and-drop from tracks
+        self.playlist_list.setAcceptDrops(True)
+        self.playlist_list.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.playlist_list.dragEnterEvent = self._playlist_drag_enter
+        self.playlist_list.dragMoveEvent = self._playlist_drag_move
+        self.playlist_list.dropEvent = self._playlist_drop
         sidebar_layout.addWidget(self.playlist_list)
         
         add_playlist_btn = QPushButton("+ New Playlist")
@@ -199,6 +208,7 @@ class MainWindow(QMainWindow):
         self.albums_scroll = QScrollArea()
         self.albums_scroll.setWidgetResizable(True)
         self.albums_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.albums_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         self.albums_container = QWidget()
         self.albums_layout = QGridLayout(self.albums_container)
@@ -215,6 +225,7 @@ class MainWindow(QMainWindow):
         self.tracks_view.request_delete_from_playlist.connect(self._on_delete_from_library)
         self.tracks_view.request_delete_from_disk.connect(self._on_delete_from_disk)
         self.tracks_view.request_toggle_star.connect(self._on_toggle_star)
+        self.tracks_view.request_add_to_playlist.connect(self._on_add_tracks_to_playlist)
         self.content_stack.addWidget(self.tracks_view)
         
         # Album detail view
@@ -270,6 +281,7 @@ class MainWindow(QMainWindow):
         self.album_tracks_view.request_delete_from_playlist.connect(self._on_delete_from_library)
         self.album_tracks_view.request_delete_from_disk.connect(self._on_delete_from_disk)
         self.album_tracks_view.request_toggle_star.connect(self._on_toggle_star)
+        self.album_tracks_view.request_add_to_playlist.connect(self._on_add_tracks_to_playlist)
         self.album_detail_layout.addWidget(self.album_tracks_view)
         
         self.content_stack.addWidget(self.album_detail)
@@ -381,6 +393,12 @@ class MainWindow(QMainWindow):
         add_to_playlist_action = QAction("Add to Playlist...", self)
         add_to_playlist_action.triggered.connect(self._add_selected_to_playlist)
         playlist_menu.addAction(add_to_playlist_action)
+        
+        playlist_menu.addSeparator()
+        
+        delete_playlist_action = QAction("Delete Selected Playlist...", self)
+        delete_playlist_action.triggered.connect(self._delete_selected_playlist)
+        playlist_menu.addAction(delete_playlist_action)
         
         # Tools menu
         tools_menu = menubar.addMenu("Tools")
@@ -721,6 +739,142 @@ class MainWindow(QMainWindow):
                             self.db.add_to_playlist(pl['id'], track['id'])
                     QMessageBox.information(self, "Added", f"Added {len(selected)} tracks to {name}")
                     break
+    
+    def _show_playlist_context_menu(self, position):
+        """Show context menu for playlists."""
+        item = self.playlist_list.itemAt(position)
+        if not item:
+            return
+        
+        pl = item.data(Qt.ItemDataRole.UserRole)
+        if not pl:
+            return
+        
+        menu = QMenu(self)
+        
+        # Open playlist
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(lambda: self._on_playlist_selected(item))
+        
+        menu.addSeparator()
+        
+        # Rename playlist
+        rename_action = menu.addAction("Rename...")
+        rename_action.triggered.connect(lambda: self._rename_playlist(pl))
+        
+        # Delete playlist
+        delete_action = menu.addAction("Delete Playlist")
+        delete_action.triggered.connect(lambda: self._delete_playlist(pl))
+        
+        menu.exec(self.playlist_list.mapToGlobal(position))
+    
+    def _rename_playlist(self, playlist: dict):
+        """Rename a playlist."""
+        name, ok = QInputDialog.getText(
+            self, "Rename Playlist", "New name:", 
+            text=playlist.get('name', '')
+        )
+        if ok and name:
+            cursor = self.db.conn.cursor()
+            cursor.execute('UPDATE playlists SET name = ? WHERE id = ?', (name, playlist['id']))
+            self.db.conn.commit()
+            self._refresh_playlists()
+    
+    def _delete_playlist(self, playlist: dict):
+        """Delete a playlist."""
+        reply = QMessageBox.question(
+            self, "Delete Playlist",
+            f"Delete playlist '{playlist.get('name', '')}'?\n\n"
+            "The tracks will not be deleted from your library.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.db.delete_playlist(playlist['id'])
+            self._refresh_playlists()
+    
+    def _delete_selected_playlist(self):
+        """Delete the currently selected playlist from sidebar."""
+        item = self.playlist_list.currentItem()
+        if not item:
+            QMessageBox.information(self, "No Selection", "Select a playlist to delete.")
+            return
+        
+        pl = item.data(Qt.ItemDataRole.UserRole)
+        if pl:
+            self._delete_playlist(pl)
+    
+    def _on_add_tracks_to_playlist(self, tracks: list):
+        """Handle add to playlist request from context menu."""
+        if not tracks:
+            return
+        
+        playlists = self.db.get_playlists()
+        if not playlists:
+            QMessageBox.information(self, "No Playlists", "Create a playlist first.")
+            return
+        
+        names = [pl['name'] for pl in playlists]
+        name, ok = QInputDialog.getItem(self, "Add to Playlist", "Select playlist:", names, 0, False)
+        
+        if ok and name:
+            for pl in playlists:
+                if pl['name'] == name:
+                    for track in tracks:
+                        if track.get('id'):
+                            self.db.add_to_playlist(pl['id'], track['id'])
+                    QMessageBox.information(self, "Added", f"Added {len(tracks)} track(s) to {name}")
+                    break
+    
+    def _playlist_drag_enter(self, event):
+        """Handle drag enter on playlist list."""
+        if event.mimeData().hasFormat('application/x-harmony-tracks') or event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def _playlist_drag_move(self, event):
+        """Handle drag move over playlist list."""
+        if event.mimeData().hasFormat('application/x-harmony-tracks') or event.mimeData().hasText():
+            # Highlight item under cursor
+            item = self.playlist_list.itemAt(event.position().toPoint())
+            if item:
+                self.playlist_list.setCurrentItem(item)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def _playlist_drop(self, event):
+        """Handle drop on playlist list."""
+        item = self.playlist_list.itemAt(event.position().toPoint())
+        if not item:
+            event.ignore()
+            return
+        
+        pl = item.data(Qt.ItemDataRole.UserRole)
+        if not pl:
+            event.ignore()
+            return
+        
+        # Get track IDs from mime data
+        track_ids = []
+        if event.mimeData().hasFormat('application/x-harmony-tracks'):
+            data = event.mimeData().data('application/x-harmony-tracks').data().decode()
+            track_ids = [int(x) for x in data.split(',') if x]
+        elif event.mimeData().hasText():
+            text = event.mimeData().text()
+            track_ids = [int(x) for x in text.split(',') if x.isdigit()]
+        
+        if track_ids:
+            for track_id in track_ids:
+                self.db.add_to_playlist(pl['id'], track_id)
+            QMessageBox.information(
+                self, "Added", 
+                f"Added {len(track_ids)} track(s) to {pl.get('name', 'playlist')}"
+            )
+            event.acceptProposedAction()
+        else:
+            event.ignore()
     
     # =========== Playback ===========
     
@@ -1228,11 +1382,24 @@ class MainWindow(QMainWindow):
             self.audio_engine.set_repeat_mode(repeat_mode)
             self.player_controls.update_repeat_state(repeat_mode)
             
-            # Restore track position
+            # Restore view
+            saved_view = state.get('current_view', 'albums')
+            if saved_view in ['albums', 'tracks', 'artists', 'genres']:
+                self.current_view = saved_view
+                self._show_view(saved_view)
+            
+            # Restore track - load it into the engine so pressing play resumes
             if state.get('current_track_id'):
                 track = self.db.get_track(state['current_track_id'])
                 if track:
                     self.player_controls.update_track_info(track)
+                    self._current_playing_id = track.get('id')
+                    # Set up the track in the playlist so play button works
+                    self.current_tracks = [track]
+                    self.audio_engine.set_playlist([track], 0)
+                    # Pause immediately - we just want it ready, not playing
+                    self.audio_engine.pause()
+                    self.player_controls.update_play_state(False)
     
     def _save_playback_state(self):
         """Save current playback state."""
@@ -1244,7 +1411,8 @@ class MainWindow(QMainWindow):
             position=position,
             volume=self.audio_engine.get_volume() / 100,
             shuffle=self.audio_engine.get_shuffle(),
-            repeat_mode=self.audio_engine.get_repeat_mode().value
+            repeat_mode=self.audio_engine.get_repeat_mode().value,
+            current_view=self.current_view
         )
     
     def _on_tray_activated(self, reason):

@@ -507,6 +507,7 @@ class TrackListWidget(QTableWidget):
     request_delete_from_playlist = pyqtSignal(dict)  # track info
     request_delete_from_disk = pyqtSignal(dict)  # track info
     request_toggle_star = pyqtSignal(dict)  # track info
+    request_add_to_playlist = pyqtSignal(list)  # list of tracks
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -527,6 +528,10 @@ class TrackListWidget(QTableWidget):
         # Enable context menu
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        
+        # Enable drag for adding to playlists
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         
         # Configure columns - allow user resizing
         header = self.horizontalHeader()
@@ -645,6 +650,12 @@ class TrackListWidget(QTableWidget):
         
         menu = QMenu(self)
         
+        # Add to Playlist
+        add_playlist_action = menu.addAction("Add to Playlist...")
+        add_playlist_action.triggered.connect(lambda: self.request_add_to_playlist.emit(selected))
+        
+        menu.addSeparator()
+        
         # Star/Unstar
         track = selected[0]
         is_starred = track.get('starred', False)
@@ -705,6 +716,19 @@ class TrackListWidget(QTableWidget):
                 if track:
                     tracks.append(track)
         return tracks
+    
+    def mimeData(self, items):
+        """Provide mime data for drag operations."""
+        from PyQt6.QtCore import QMimeData
+        mime = QMimeData()
+        # Get selected tracks and store their IDs
+        track_ids = []
+        for track in self.get_selected_tracks():
+            if track.get('id'):
+                track_ids.append(str(track['id']))
+        mime.setText(','.join(track_ids))
+        mime.setData('application/x-harmony-tracks', ','.join(track_ids).encode())
+        return mime
 
 
 class ClickableSlider(QSlider):

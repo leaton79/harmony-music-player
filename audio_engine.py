@@ -135,9 +135,12 @@ class AudioEngine:
     def toggle_play_pause(self):
         """Toggle between play and pause."""
         # If we have a track loaded and player is idle, start playing
-        if self._current_track and self.player.idle_active:
-            self.player.play(self._current_track)
-        else:
+        try:
+            if self._current_track and self.player.idle_active:
+                self.player.play(self._current_track)
+            else:
+                self.player.pause = not self.player.pause
+        except Exception:
             self.player.pause = not self.player.pause
     
     def stop(self):

@@ -106,9 +106,22 @@ class MusicDatabase:
                 volume REAL DEFAULT 1.0,
                 shuffle INTEGER DEFAULT 0,
                 repeat_mode INTEGER DEFAULT 0,
+                current_view TEXT DEFAULT 'albums',
+                current_view_data TEXT,
                 FOREIGN KEY (current_track_id) REFERENCES tracks(id)
             )
         ''')
+        
+        # Add current_view column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute('ALTER TABLE playback_state ADD COLUMN current_view TEXT DEFAULT "albums"')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            cursor.execute('ALTER TABLE playback_state ADD COLUMN current_view_data TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         
         # Initialize playback state if not exists
         cursor.execute('''
@@ -593,14 +606,16 @@ class MusicDatabase:
     # =========== Playback State ===========
     
     def save_playback_state(self, track_id: int = None, position: float = 0, 
-                           volume: float = 1.0, shuffle: bool = False, repeat_mode: int = 0):
+                           volume: float = 1.0, shuffle: bool = False, repeat_mode: int = 0,
+                           current_view: str = 'albums', current_view_data: str = None):
         """Save current playback state for resume functionality."""
         cursor = self.conn.cursor()
         cursor.execute('''
             UPDATE playback_state 
-            SET current_track_id = ?, position = ?, volume = ?, shuffle = ?, repeat_mode = ?
+            SET current_track_id = ?, position = ?, volume = ?, shuffle = ?, repeat_mode = ?,
+                current_view = ?, current_view_data = ?
             WHERE id = 1
-        ''', (track_id, position, volume, int(shuffle), repeat_mode))
+        ''', (track_id, position, volume, int(shuffle), repeat_mode, current_view, current_view_data))
         self.conn.commit()
     
     def get_playback_state(self) -> Dict:
