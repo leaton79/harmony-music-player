@@ -9,7 +9,7 @@ from typing import List
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QListWidget, QListWidgetItem, QFileDialog,
+    QLabel, QPushButton, QListWidget, QListWidgetItem, QFileDialog, QLineEdit,
     QMessageBox, QGridLayout, QScrollArea, QFrame, QSplitter, QMenu,
     QDialog, QInputDialog, QProgressDialog, QSystemTrayIcon, QStyle,
     QStackedWidget, QAbstractItemView
