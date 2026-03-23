@@ -12,10 +12,10 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QListWidget, QListWidgetItem, QFileDialog,
     QMessageBox, QGridLayout, QScrollArea, QFrame, QSplitter, QMenu,
     QDialog, QInputDialog, QProgressDialog, QSystemTrayIcon, QStyle,
-    QStackedWidget, QShortcut, QAbstractItemView
+    QStackedWidget, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap, QFont, QAction, QKeySequence, QPalette, QColor
+from PyQt6.QtGui import QPixmap, QFont, QAction, QKeySequence, QPalette, QColor, QShortcut
 
 # Set app name BEFORE importing PyQt6 (fixes menu bar showing "Python")
 if sys.platform == 'darwin':

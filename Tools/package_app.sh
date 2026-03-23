@@ -7,8 +7,10 @@ BUILD_DIR="${1:-/tmp/HarmonyAppBuild}"
 APP_DIR="$BUILD_DIR/$APP_NAME"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
+ICONSET_DIR="$BUILD_DIR/Harmony.iconset"
 
 rm -rf "$APP_DIR"
+rm -rf "$ICONSET_DIR"
 mkdir -p "$RESOURCES_DIR" "$MACOS_DIR"
 
 cp "$ROOT_DIR"/main.py "$RESOURCES_DIR"/
@@ -26,6 +28,9 @@ if [[ ! -d "$ROOT_DIR/.venv" ]]; then
 fi
 
 cp -R "$ROOT_DIR/.venv" "$RESOURCES_DIR/.venv"
+
+"$ROOT_DIR/.venv/bin/python3" "$ROOT_DIR/Tools/generate_app_icon.py" "$ICONSET_DIR"
+iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/Harmony.icns"
 
 cat > "$MACOS_DIR/Harmony" <<'EOF'
 #!/bin/zsh
@@ -52,6 +57,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
     <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
+    <key>CFBundleIconFile</key>
+    <string>Harmony</string>
     <key>CFBundleExecutable</key>
     <string>Harmony</string>
     <key>CFBundlePackageType</key>
