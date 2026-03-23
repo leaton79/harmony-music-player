@@ -320,15 +320,19 @@ class MetadataWriter:
             }
             
             for key, tag_class in tag_mapping.items():
+                audio.tags.delall(tag_class.FrameID)
                 if key in metadata and metadata[key]:
                     audio.tags.add(tag_class(encoding=3, text=str(metadata[key])))
             
+            audio.tags.delall(TDRC.FrameID)
             if 'year' in metadata and metadata['year']:
                 audio.tags.add(TDRC(encoding=3, text=str(metadata['year'])))
             
+            audio.tags.delall(TRCK.FrameID)
             if 'track_number' in metadata and metadata['track_number']:
                 audio.tags.add(TRCK(encoding=3, text=str(metadata['track_number'])))
             
+            audio.tags.delall(TPOS.FrameID)
             if 'disc_number' in metadata and metadata['disc_number']:
                 audio.tags.add(TPOS(encoding=3, text=str(metadata['disc_number'])))
             
@@ -555,7 +559,8 @@ class LibraryScanner:
     def __init__(self):
         self.metadata_reader = MetadataReader()
     
-    def scan_directory(self, directory: str, recursive: bool = True) -> List[Dict]:
+    def scan_directory(self, directory: str, recursive: bool = True,
+                      should_cancel=None, progress_callback=None) -> List[Dict]:
         """Scan a directory for audio files and return their metadata."""
         directory = Path(directory)
         if not directory.exists():
@@ -569,7 +574,12 @@ class LibraryScanner:
             pattern = '*'
         
         for file_path in directory.glob(pattern):
+            if should_cancel and should_cancel():
+                break
+
             if file_path.is_file() and self.metadata_reader.is_supported(str(file_path)):
+                if progress_callback:
+                    progress_callback(str(file_path))
                 metadata = self.metadata_reader.read_metadata(str(file_path))
                 if metadata:
                     tracks.append(metadata)

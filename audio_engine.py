@@ -2,7 +2,6 @@
 Audio engine module using mpv for high-quality gapless playback.
 """
 
-import threading
 from typing import Callable, Optional, List
 from enum import IntEnum
 
@@ -58,8 +57,6 @@ class AudioEngine:
         # Setup event observers
         self._setup_observers()
         
-        # Position update thread
-        self._position_thread = None
         self._running = True
     
     def _setup_observers(self):
@@ -69,7 +66,7 @@ class AudioEngine:
         
         @self.player.event_callback('end-file')
         def on_end_file(event):
-            reason = event.get('event', {}).get('reason', 'unknown')
+            reason = event.get('reason', 'unknown')
             if reason == 'eof':
                 self._handle_track_end()
             elif reason == 'error':
@@ -166,6 +163,10 @@ class AudioEngine:
     
     def set_playlist(self, tracks: List[dict], start_index: int = 0):
         """Set the playlist and optionally start playing."""
+        self.set_playlist_state(tracks, start_index, autoplay=True)
+
+    def set_playlist_state(self, tracks: List[dict], start_index: int = 0, autoplay: bool = True):
+        """Set the playlist and optionally load a track without starting playback."""
         self._playlist = tracks
         self._playlist_index = -1
         
@@ -173,13 +174,58 @@ class AudioEngine:
             self._generate_shuffle_order()
         
         if tracks and start_index >= 0:
-            self.play_index(start_index)
+            self.play_index(start_index, autoplay=autoplay)
     
     def add_to_playlist(self, track: dict):
         """Add a track to the end of the playlist."""
         self._playlist.append(track)
         if self._shuffle:
             self._shuffle_order.append(len(self._playlist) - 1)
+
+    def add_to_queue(self, track: dict):
+        """Append a track to the end of the current queue."""
+        self.add_to_playlist(track)
+
+    def play_next(self, track: dict):
+        """Insert a track to play immediately after the current one."""
+        if not self._playlist:
+            self.set_playlist([track], 0)
+            return
+
+        if self._shuffle:
+            actual_index = len(self._playlist)
+            self._playlist.append(track)
+            insert_at = max(0, self._playlist_index + 1)
+            self._shuffle_order.insert(insert_at, actual_index)
+        else:
+            insert_at = max(0, self._playlist_index + 1)
+            self._playlist.insert(insert_at, track)
+
+    def clear_up_next(self):
+        """Keep only the current track in the queue."""
+        current_track = self.get_current_track()
+        if not current_track:
+            self.clear_playlist()
+            return
+
+        self._playlist = [current_track]
+        self._playlist_index = 0
+        self._shuffle_order = [0]
+
+    def get_up_next(self) -> List[dict]:
+        """Return tracks that will play after the current one."""
+        if not self._playlist:
+            return []
+
+        if self._shuffle:
+            if self._playlist_index < 0:
+                return [self._playlist[idx] for idx in self._shuffle_order]
+            remaining_indices = self._shuffle_order[self._playlist_index + 1:]
+            return [self._playlist[idx] for idx in remaining_indices]
+
+        if self._playlist_index < 0:
+            return self._playlist.copy()
+        return self._playlist[self._playlist_index + 1:].copy()
     
     def clear_playlist(self):
         """Clear the playlist."""
@@ -188,7 +234,7 @@ class AudioEngine:
         self._shuffle_order = []
         self.stop()
     
-    def play_index(self, index: int):
+    def play_index(self, index: int, autoplay: bool = True):
         """Play track at specific playlist index."""
         if 0 <= index < len(self._playlist):
             if self._shuffle:
@@ -204,11 +250,20 @@ class AudioEngine:
                 actual_index = index
             
             track = self._playlist[actual_index]
-            self._current_track = track.get('file_path')
-            self.player.play(self._current_track)
+            self._load_track(track, autoplay=autoplay)
             
             if self._on_track_change:
                 self._on_track_change(track, actual_index)
+
+    def load_track_for_resume(self, track: dict, position: float = 0):
+        """Load a single track in a paused state and seek to the saved position."""
+        self._playlist = [track]
+        self._playlist_index = 0
+        self._shuffle_order = [0]
+        self._load_track(track, autoplay=False)
+
+        if position and position > 0:
+            self.seek(position)
     
     def next(self):
         """Play next track in playlist."""
@@ -236,8 +291,7 @@ class AudioEngine:
             actual_index = next_idx
         
         track = self._playlist[actual_index]
-        self._current_track = track.get('file_path')
-        self.player.play(self._current_track)
+        self._load_track(track, autoplay=True)
         
         if self._on_track_change:
             self._on_track_change(track, actual_index)
@@ -273,11 +327,23 @@ class AudioEngine:
             actual_index = prev_idx
         
         track = self._playlist[actual_index]
-        self._current_track = track.get('file_path')
-        self.player.play(self._current_track)
+        self._load_track(track, autoplay=True)
         
         if self._on_track_change:
             self._on_track_change(track, actual_index)
+
+    def _load_track(self, track: dict, autoplay: bool):
+        """Load a track into mpv and optionally start playback immediately."""
+        self._current_track = track.get('file_path')
+        try:
+            if autoplay:
+                self.player.play(self._current_track)
+            else:
+                self.player.play(self._current_track)
+                self.player.pause = True
+        except Exception as exc:
+            if self._on_error:
+                self._on_error(f"Could not play track: {exc}")
     
     def _generate_shuffle_order(self):
         """Generate random shuffle order."""
@@ -443,6 +509,10 @@ class AudioEngineStub:
         self._position = 0
         self._duration = 180
         self._current_track = None
+        self._on_track_change = None
+        self._on_playback_end = None
+        self._on_position_change = None
+        self._on_error = None
     
     def play(self, file_path: str = None):
         self._playing = True
@@ -468,16 +538,32 @@ class AudioEngineStub:
         self._position += offset
     
     def set_playlist(self, tracks, start_index=0):
+        self.set_playlist_state(tracks, start_index, autoplay=True)
+
+    def set_playlist_state(self, tracks, start_index=0, autoplay=True):
         self._playlist = tracks
+        self._playlist_index = -1
         if tracks:
-            self.play_index(start_index)
-    
-    def play_index(self, index):
+            self.play_index(start_index, autoplay=autoplay)
+
+    def play_index(self, index, autoplay=True):
         if 0 <= index < len(self._playlist):
             self._playlist_index = index
             self._current_track = self._playlist[index].get('file_path')
             self._playing = True
-            self._paused = False
+            self._paused = not autoplay
+            if self._on_track_change:
+                self._on_track_change(self._playlist[index], index)
+
+    def load_track_for_resume(self, track, position=0):
+        self._playlist = [track]
+        self._playlist_index = 0
+        self._current_track = track.get('file_path')
+        self._playing = True
+        self._paused = True
+        self._position = position
+        if self._on_track_change:
+            self._on_track_change(track, 0)
     
     def next(self):
         if self._playlist_index < len(self._playlist) - 1:
@@ -486,6 +572,30 @@ class AudioEngineStub:
     def previous(self):
         if self._playlist_index > 0:
             self.play_index(self._playlist_index - 1)
+
+    def add_to_queue(self, track):
+        self._playlist.append(track)
+
+    def play_next(self, track):
+        if not self._playlist:
+            self.set_playlist([track], 0)
+            return
+        insert_at = max(0, self._playlist_index + 1)
+        self._playlist.insert(insert_at, track)
+
+    def clear_up_next(self):
+        current = self.get_current_track()
+        if current:
+            self._playlist = [current]
+            self._playlist_index = 0
+        else:
+            self._playlist = []
+            self._playlist_index = -1
+
+    def get_up_next(self):
+        if self._playlist_index < 0:
+            return self._playlist.copy()
+        return self._playlist[self._playlist_index + 1:].copy()
     
     @property
     def is_playing(self):
@@ -533,10 +643,10 @@ class AudioEngineStub:
         self._repeat_mode = modes[(idx + 1) % len(modes)]
         return self._repeat_mode
     
-    def on_track_change(self, callback): pass
-    def on_playback_end(self, callback): pass
-    def on_position_change(self, callback): pass
-    def on_error(self, callback): pass
+    def on_track_change(self, callback): self._on_track_change = callback
+    def on_playback_end(self, callback): self._on_playback_end = callback
+    def on_position_change(self, callback): self._on_position_change = callback
+    def on_error(self, callback): self._on_error = callback
     
     def cleanup(self): pass
     def add_to_playlist(self, track): self._playlist.append(track)

@@ -339,16 +339,15 @@ class MusicDatabase:
             
             file_path = row['file_path']
             
-            # Delete from library first
-            cursor.execute('DELETE FROM tracks WHERE id = ?', (track_id,))
-            self.conn.commit()
-            
             # Delete file from disk
             if os.path.exists(file_path):
                 os.remove(file_path)
-                return True, f"Deleted: {file_path}"
             else:
-                return True, "Track removed from library (file was already missing)"
+                return False, "File is already missing from disk. Use 'Remove from Library' instead."
+
+            cursor.execute('DELETE FROM tracks WHERE id = ?', (track_id,))
+            self.conn.commit()
+            return True, f"Deleted: {file_path}"
                 
         except OSError as e:
             return False, f"Could not delete file: {e}"
@@ -598,6 +597,16 @@ class MusicDatabase:
         try:
             cursor = self.conn.cursor()
             cursor.execute('DELETE FROM playlists WHERE id = ?', (playlist_id,))
+            self.conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error:
+            return False
+
+    def rename_playlist(self, playlist_id: int, name: str) -> bool:
+        """Rename an existing playlist."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('UPDATE playlists SET name = ? WHERE id = ?', (name, playlist_id))
             self.conn.commit()
             return cursor.rowcount > 0
         except sqlite3.Error:

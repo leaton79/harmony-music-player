@@ -7,10 +7,12 @@ A modern, Spotify-inspired music player for macOS built with Python and PyQt6.
 ## Features
 
 ### Core Playback
-- **Gapless playback** powered by mpv
+- **Reliable local playback** powered by mpv
 - **Shuffle & Repeat** modes (Off, All, One)
+- **Up Next queue** with Play Next, Add to Queue, and Clear Queue
+- **Session restore** that reopens the last track paused at the saved position
 - **Click-to-seek** on progress bar
-- **Keyboard shortcuts** for all controls
+- **Keyboard shortcuts** for core controls
 
 ### Library Management
 - Scan folders for music (MP3, FLAC, M4A, WAV, OGG, OPUS, WMA, AIFF)
@@ -20,19 +22,22 @@ A modern, Spotify-inspired music player for macOS built with Python and PyQt6.
 - **Star/favorite** tracks for quick access
 
 ### Interface
-- **Dark theme** with 8 color schemes (Spotify, Blue, Purple, Nord, Dracula, Monokai, Light, Solarized)
-- Browse by Albums, Artists, Genres, or All Tracks
-- Sortable, resizable columns
-- Album artwork display
+- **Seven built-in themes** with high-contrast text
+- Browse by Albums, Artists, Genres, playlists, or All Tracks
+- Search results with context headers and summaries
+- Album artwork display and polished album detail view
+- Stronger current-track highlighting across views
 - System tray integration
 
 ### Track Management
 - **Right-click context menu**:
+  - Play Next
+  - Add to Queue
   - Edit Metadata
   - Star/Unstar
   - Remove from Library
   - Delete from Disk
-- Play count tracking
+- Play counts only after meaningful listening
 
 ## Screenshots
 
@@ -66,74 +71,28 @@ cd harmony-music-player
 ### 3. Set Up Python Environment
 
 ```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install Python dependencies
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
 ```
 
 ### 4. Run Harmony
 
 ```bash
-LC_ALL=C python main_window.py
+source .venv/bin/activate
+python3 main_window.py
 ```
 
 ## Building the macOS App Bundle
 
-To create a standalone `.app` bundle:
+To create a standalone `.app` bundle with the bundled virtual environment:
 
 ```bash
-# Create app structure
-mkdir -p Harmony.app/Contents/{MacOS,Resources}
+./Tools/package_app.sh
 
-# Copy files
-cp -r *.py database.py audio_engine.py metadata.py requirements.txt Harmony.app/Contents/Resources/
-
-# Create launcher script
-cat > Harmony.app/Contents/MacOS/Harmony << 'EOF'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
-cd "$DIR"
-source venv/bin/activate 2>/dev/null || {
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-}
-export LC_ALL=C
-exec python main_window.py
-EOF
-chmod +x Harmony.app/Contents/MacOS/Harmony
-
-# Create Info.plist
-cat > Harmony.app/Contents/Info.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>Harmony</string>
-    <key>CFBundleDisplayName</key>
-    <string>Harmony</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.harmony.musicplayer</string>
-    <key>CFBundleVersion</key>
-    <string>1.0.0</string>
-    <key>CFBundleExecutable</key>
-    <string>Harmony</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
-EOF
-
-# Move to Applications
-mv Harmony.app /Applications/
+# Install or replace the app in /Applications
+rm -rf /Applications/Harmony.app
+cp -R /tmp/HarmonyAppBuild/Harmony.app /Applications/Harmony.app
 ```
 
 ## Keyboard Shortcuts
@@ -167,21 +126,20 @@ harmony-music-player/
 
 Harmony stores its data in `~/.harmony_player/`:
 - `library.db` - SQLite database with your music library
-- `cover_art/` - Cached album artwork
-- `playback_state.json` - Last playback position and settings
+- `artwork/` - Cached album artwork
+- SQLite playback state inside `library.db`
 
 ## Themes
 
 Access themes via **View → Theme**:
 
-- **Dark (Spotify)** - Green accent (default)
-- **Dark (Blue)** - Blue accent
-- **Dark (Purple)** - Purple/pink accent
-- **Nord** - Nord color palette
-- **Dracula** - Dracula theme colors
-- **Monokai** - Monokai editor colors
-- **Light** - Light theme
-- **Solarized Dark** - Solarized dark colors
+- **Spotify Dark**
+- **Ocean Blue**
+- **Sunset Orange**
+- **Forest Green**
+- **Purple Haze**
+- **Classic Dark**
+- **Light Mode**
 
 ## Contributing
 
@@ -193,10 +151,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## Known Issues
+## Current Focus
 
-- The `LC_ALL=C` environment variable is required for mpv compatibility on some systems
-- First launch may take a moment while dependencies are installed
+- Playback reliability and queue behavior
+- Better visual hierarchy and higher contrast text
+- Safer library and file-management flows
 
 ## License
 
