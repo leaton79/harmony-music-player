@@ -54,9 +54,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<'EOF'
     <key>CFBundleIdentifier</key>
     <string>com.harmony.musicplayer</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleIconFile</key>
     <string>Harmony</string>
     <key>CFBundleExecutable</key>

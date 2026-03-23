@@ -36,7 +36,7 @@ from themes import APP_THEMES, DEFAULT_STYLESHEET, DEFAULT_THEME, generate_style
 # =========== Constants ===========
 
 APP_NAME = "Harmony"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 DEFAULT_COVER = None  # Will be set to a default image path
 
 
