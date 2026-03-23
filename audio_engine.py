@@ -67,11 +67,25 @@ class AudioEngine:
         @self.player.event_callback('end-file')
         def on_end_file(event):
             reason = event.get('reason', 'unknown')
-            if reason == 'eof':
+            if reason != 'error':
                 self._handle_track_end()
-            elif reason == 'error':
+            else:
                 if self._on_error:
                     self._on_error("Playback error")
+
+        @self.player.property_observer('eof-reached')
+        def on_eof_reached(name, value):
+            if value:
+                self._handle_track_end()
+
+        @self.player.property_observer('idle-active')
+        def on_idle_active(name, value):
+            if value and self._current_track:
+                try:
+                    if not self.player.pause:
+                        self._handle_track_end()
+                except Exception:
+                    self._handle_track_end()
         
         @self.player.property_observer('time-pos')
         def on_time_pos(name, value):

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
@@ -7,7 +8,7 @@ from PyQt6.QtWidgets import QApplication
 from audio_engine import AudioEngineStub
 from database import MusicDatabase
 from main import TrackListWidget
-from playback_rules import has_meaningful_playback
+from playback_rules import has_meaningful_playback, resolve_playback_queue, should_restore_playback
 
 
 class PlaybackRulesTests(unittest.TestCase):
@@ -18,6 +19,42 @@ class PlaybackRulesTests(unittest.TestCase):
     def test_meaningful_playback_reaches_thirty_seconds_for_long_track(self):
         self.assertTrue(has_meaningful_playback(30, 240))
         self.assertFalse(has_meaningful_playback(29, 240))
+
+    def test_resolve_playback_queue_prefers_current_view_when_track_is_present(self):
+        preferred_tracks = [
+            {"id": 2, "title": "Second"},
+            {"id": 3, "title": "Third"},
+        ]
+        library_tracks = [
+            {"id": 1, "title": "First"},
+            {"id": 2, "title": "Second"},
+            {"id": 3, "title": "Third"},
+        ]
+
+        queue, index = resolve_playback_queue(3, preferred_tracks, library_tracks)
+
+        self.assertEqual([track["id"] for track in queue], [2, 3])
+        self.assertEqual(index, 1)
+
+    def test_resolve_playback_queue_falls_back_to_library_when_needed(self):
+        preferred_tracks = [{"id": 9, "title": "Other"}]
+        library_tracks = [
+            {"id": 1, "title": "First"},
+            {"id": 2, "title": "Second"},
+        ]
+
+        queue, index = resolve_playback_queue(2, preferred_tracks, library_tracks)
+
+        self.assertEqual([track["id"] for track in queue], [1, 2])
+        self.assertEqual(index, 1)
+
+    def test_should_restore_playback_requires_meaningful_progress(self):
+        self.assertFalse(should_restore_playback(2, 240))
+        self.assertTrue(should_restore_playback(45, 240))
+
+    def test_should_restore_playback_ignores_tracks_at_the_end(self):
+        self.assertFalse(should_restore_playback(238, 240))
+        self.assertTrue(should_restore_playback(200, 240))
 
 
 class MusicDatabaseReliabilityTests(unittest.TestCase):
@@ -68,6 +105,7 @@ class MusicDatabaseReliabilityTests(unittest.TestCase):
             shuffle=True,
             repeat_mode=2,
             current_view="tracks",
+            current_view_data=json.dumps({"playlist_id": 7}),
         )
 
         state = self.db.get_playback_state()
@@ -78,6 +116,7 @@ class MusicDatabaseReliabilityTests(unittest.TestCase):
         self.assertEqual(state["shuffle"], 1)
         self.assertEqual(state["repeat_mode"], 2)
         self.assertEqual(state["current_view"], "tracks")
+        self.assertEqual(state["current_view_data"], json.dumps({"playlist_id": 7}))
 
 
 class QueueReliabilityTests(unittest.TestCase):

@@ -4,6 +4,7 @@ Harmony Music Player - Main Window (Part 2)
 
 import sys
 import os
+import json
 from pathlib import Path
 from typing import List
 
@@ -15,7 +16,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap, QFont, QAction, QKeySequence, QPalette, QColor, QShortcut
+from PyQt6.QtGui import QPixmap, QFont, QAction, QKeySequence, QPalette, QColor, QShortcut, QIcon
 
 # Set app name BEFORE importing PyQt6 (fixes menu bar showing "Python")
 if sys.platform == 'darwin':
@@ -45,7 +46,7 @@ from main import (
     format_duration,
 )
 from metadata import MetadataReader, MetadataWriter
-from playback_rules import has_meaningful_playback
+from playback_rules import has_meaningful_playback, resolve_playback_queue, should_restore_playback
 from themes import APP_THEMES, DEFAULT_THEME, generate_stylesheet
 
 
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
         
         # Current state
         self.current_view = "albums"
+        self.current_view_data = {}
         self.current_tracks: List[dict] = []
         
         # Setup UI
@@ -665,7 +667,7 @@ class MainWindow(QMainWindow):
     
     def _show_view(self, view: str):
         """Switch to a specific view."""
-        self.current_view = view
+        self._set_view_context(view)
         self._update_sidebar_selection(view)
         
         if view == "albums":
@@ -685,6 +687,11 @@ class MainWindow(QMainWindow):
             self._set_content_header("Library", "Genres", "Browse tagged music by genre.")
             self._load_genres_view()
             self.content_stack.setCurrentWidget(self.genres_list)
+
+    def _set_view_context(self, view: str, data: dict | None = None):
+        """Track the current navigation context for session restore."""
+        self.current_view = view
+        self.current_view_data = data or {}
     
     def _load_albums_view(self):
         """Load albums grid view."""
@@ -823,6 +830,7 @@ class MainWindow(QMainWindow):
         else:
             return
         
+        self._set_view_context("smart_playlist", {"playlist_type": playlist_type})
         self.current_tracks = tracks
         self._set_content_header("Smart Playlist", title, f"{len(tracks)} tracks. {subtitle}")
         self.tracks_view.set_tracks(tracks)
@@ -832,6 +840,7 @@ class MainWindow(QMainWindow):
         """Handle album card click - show album detail."""
         album = album_info.get('album')
         artist = album_info.get('artist')
+        self._set_view_context("album", {"album": album, "artist": artist})
         
         # Load album tracks
         tracks = self.db.get_album_tracks(album, artist)
@@ -871,6 +880,7 @@ class MainWindow(QMainWindow):
     def _on_artist_selected(self, item):
         """Handle artist selection."""
         artist = item.text()
+        self._set_view_context("artist_albums", {"artist": artist})
         albums = self.db.get_albums(artist)
         self._set_content_header("Artist", artist, f"{len(albums)} album{'s' if len(albums) != 1 else ''} in your library.")
         
@@ -891,6 +901,7 @@ class MainWindow(QMainWindow):
     def _on_genre_selected(self, item):
         """Handle genre selection."""
         genre = item.text()
+        self._set_view_context("genre", {"genre": genre})
         tracks = self.db.get_tracks_by_genre(genre)
         self.current_tracks = tracks
         self._set_content_header("Genre", genre, f"{len(tracks)} matching track{'s' if len(tracks) != 1 else ''}.")
@@ -901,9 +912,12 @@ class MainWindow(QMainWindow):
         """Handle search input."""
         self.clear_search_btn.setVisible(bool(text))
         if not text:
-            self._show_view(self.current_view)
+            fallback_view = self.current_view_data.get("previous_view", "albums") if self.current_view == "search" else self.current_view
+            self._show_view(fallback_view if fallback_view in ['albums', 'tracks', 'artists', 'genres'] else 'albums')
             return
         
+        previous_view = self.current_view if self.current_view != "search" else self.current_view_data.get("previous_view", "albums")
+        self._set_view_context("search", {"query": text, "previous_view": previous_view})
         tracks = self.db.search_tracks(text)
         self.current_tracks = tracks
         artist_count = len({t.get('artist') for t in tracks if t.get('artist')})
@@ -1006,6 +1020,7 @@ class MainWindow(QMainWindow):
         """Handle playlist double-click."""
         pl = item.data(Qt.ItemDataRole.UserRole)
         if pl:
+            self._set_view_context("playlist", {"playlist_id": pl['id']})
             tracks = self.db.get_playlist_tracks(pl['id'])
             self.current_tracks = tracks
             self._set_content_header("Playlist", pl['name'], f"{len(tracks)} track{'s' if len(tracks) != 1 else ''} in this playlist.")
@@ -1249,6 +1264,8 @@ class MainWindow(QMainWindow):
                     self.player_controls.update_play_state(True)
                     self._current_playing_id = tracks[0].get('id')
                     return
+
+        self._ensure_playback_queue_for_current_track()
         
         # Toggle play/pause if a track is loaded
         self.audio_engine.toggle_play_pause()
@@ -1256,6 +1273,7 @@ class MainWindow(QMainWindow):
     
     def _next_track(self):
         """Play next track."""
+        self._ensure_playback_queue_for_current_track()
         self.audio_engine.next()
         # Update UI after track change
         track = self.audio_engine.get_current_track()
@@ -1264,6 +1282,7 @@ class MainWindow(QMainWindow):
             self.player_controls.update_play_state(True)
             self._current_playing_id = track.get('id')
             self._highlight_playing_track()
+            self._refresh_up_next()
     
     def _prev_track(self):
         """Play previous track."""
@@ -1375,6 +1394,36 @@ class MainWindow(QMainWindow):
         if has_meaningful_playback(position, duration):
             self.db.update_play_count(track['id'])
             self._play_counted_for_current_track = True
+
+    def _ensure_playback_queue_for_current_track(self):
+        """Expand a single-track restored session into a usable queue when possible."""
+        current_track = self.audio_engine.get_current_track()
+        if not current_track:
+            return
+
+        playlist = self.audio_engine.get_playlist()
+        if len(playlist) > 1:
+            return
+
+        preferred_tracks = self.current_tracks if len(self.current_tracks) > 1 else []
+        library_tracks = self.db.get_all_tracks() if not preferred_tracks else []
+        restored_playlist, restored_index = resolve_playback_queue(
+            current_track.get('id'),
+            preferred_tracks,
+            library_tracks,
+        )
+
+        if restored_index < 0 or len(restored_playlist) <= 1:
+            return
+
+        current_position = self.audio_engine.get_position() or 0
+        was_playing = self.audio_engine.is_playing
+
+        self.current_tracks = restored_playlist
+        self.audio_engine.set_playlist_state(restored_playlist, restored_index, autoplay=was_playing)
+        if current_position:
+            self.audio_engine.seek(current_position)
+        self._refresh_up_next()
     
     # =========== Context Menu Handlers ===========
     
@@ -1615,6 +1664,56 @@ class MainWindow(QMainWindow):
         )
     
     # =========== State Management ===========
+
+    def _restore_view_context(self, view: str, view_data: dict):
+        """Restore the screen context the user was last in."""
+        if view in ['albums', 'tracks', 'artists', 'genres']:
+            self._show_view(view)
+            return
+
+        if view == "smart_playlist":
+            playlist_type = view_data.get("playlist_type")
+            if playlist_type:
+                self._show_smart_playlist(playlist_type)
+                return
+
+        if view == "playlist":
+            playlist_id = view_data.get("playlist_id")
+            if playlist_id:
+                playlists = self.db.get_playlists()
+                playlist = next((pl for pl in playlists if pl.get('id') == playlist_id), None)
+                if playlist:
+                    item = QListWidgetItem(playlist['name'])
+                    item.setData(Qt.ItemDataRole.UserRole, playlist)
+                    self._on_playlist_selected(item)
+                    return
+
+        if view == "album":
+            album = view_data.get("album")
+            artist = view_data.get("artist")
+            if album is not None:
+                self._on_album_clicked({"album": album, "artist": artist})
+                return
+
+        if view == "artist_albums":
+            artist = view_data.get("artist")
+            if artist:
+                self._on_artist_selected(QListWidgetItem(artist))
+                return
+
+        if view == "genre":
+            genre = view_data.get("genre")
+            if genre:
+                self._on_genre_selected(QListWidgetItem(genre))
+                return
+
+        if view == "search":
+            query = view_data.get("query", "")
+            if query:
+                self.search_edit.setText(query)
+                return
+
+        self._show_view("albums")
     
     def _restore_playback_state(self):
         """Restore playback state from database."""
@@ -1634,19 +1733,41 @@ class MainWindow(QMainWindow):
             
             # Restore view
             saved_view = state.get('current_view', 'albums')
-            if saved_view in ['albums', 'tracks', 'artists', 'genres']:
-                self.current_view = saved_view
-                self._show_view(saved_view)
+            raw_view_data = state.get('current_view_data')
+            try:
+                saved_view_data = json.loads(raw_view_data) if raw_view_data else {}
+            except json.JSONDecodeError:
+                saved_view_data = {}
+            self._restore_view_context(saved_view, saved_view_data)
             
             # Restore track - load it into the engine so pressing play resumes
             if state.get('current_track_id'):
                 track = self.db.get_track(state['current_track_id'])
+                saved_position = state.get('position', 0) or 0
                 if track:
                     self._restoring_session = True
-                    self.current_tracks = [track]
-                    self.audio_engine.load_track_for_resume(track, state.get('position', 0) or 0)
+                    restore_playlist, restore_index = resolve_playback_queue(
+                        track.get('id'),
+                        self.current_tracks,
+                        self.db.get_all_tracks(),
+                    )
+
+                    if restore_index >= 0:
+                        self.current_tracks = restore_playlist
+                        self.audio_engine.set_playlist_state(restore_playlist, restore_index, autoplay=False)
+                        if should_restore_playback(saved_position, track.get('duration', 0) or 0):
+                            self.audio_engine.seek(saved_position)
+                    else:
+                        self.current_tracks = [track]
+                        self.audio_engine.load_track_for_resume(
+                            track,
+                            saved_position if should_restore_playback(saved_position, track.get('duration', 0) or 0) else 0,
+                        )
                     self.player_controls.update_track_info(track)
-                    self.player_controls.update_progress(state.get('position', 0) or 0, track.get('duration', 0) or 0)
+                    self.player_controls.update_progress(
+                        saved_position if should_restore_playback(saved_position, track.get('duration', 0) or 0) else 0,
+                        track.get('duration', 0) or 0,
+                    )
                     self.player_controls.update_play_state(False)
                     self._current_playing_id = track.get('id')
                     self._restoring_session = False
@@ -1656,14 +1777,17 @@ class MainWindow(QMainWindow):
         """Save current playback state."""
         track = self.audio_engine.get_current_track()
         position = self.audio_engine.get_position() or 0
+        duration = self.audio_engine.get_duration() or (track.get('duration', 0) if track else 0)
+        should_resume = bool(track and should_restore_playback(position, duration or 0))
         
         self.db.save_playback_state(
             track_id=track.get('id') if track else None,
-            position=position,
+            position=position if should_resume else 0,
             volume=self.audio_engine.get_volume() / 100,
             shuffle=self.audio_engine.get_shuffle(),
             repeat_mode=self.audio_engine.get_repeat_mode().value,
-            current_view=self.current_view
+            current_view=self.current_view,
+            current_view_data=json.dumps(self.current_view_data) if self.current_view_data else None,
         )
     
     def _on_tray_activated(self, reason):
@@ -1694,6 +1818,20 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setQuitOnLastWindowClosed(True)
+
+    icon_path = Path(__file__).resolve().parent / "Harmony.icns"
+    if icon_path.exists():
+        app_icon = QIcon(str(icon_path))
+        app.setWindowIcon(app_icon)
+
+        if sys.platform == 'darwin':
+            try:
+                from AppKit import NSApplication, NSImage
+                ns_image = NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+                if ns_image:
+                    NSApplication.sharedApplication().setApplicationIconImage_(ns_image)
+            except Exception:
+                pass
     
     # Apply dark theme
     app.setStyleSheet(DARK_STYLE)
@@ -1713,6 +1851,8 @@ def main():
     
     # Create main window
     window = MainWindow()
+    if icon_path.exists():
+        window.setWindowIcon(QIcon(str(icon_path)))
     window.show()
     
     # Run
