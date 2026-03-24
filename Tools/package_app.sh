@@ -7,10 +7,9 @@ BUILD_DIR="${1:-/tmp/HarmonyAppBuild}"
 APP_DIR="$BUILD_DIR/$APP_NAME"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
-ICONSET_DIR="$BUILD_DIR/Harmony.iconset"
+ICON_FILE="$ROOT_DIR/Assets/Harmony.icns"
 
 rm -rf "$APP_DIR"
-rm -rf "$ICONSET_DIR"
 mkdir -p "$RESOURCES_DIR" "$MACOS_DIR"
 
 cp "$ROOT_DIR"/main.py "$RESOURCES_DIR"/
@@ -29,8 +28,12 @@ fi
 
 cp -R "$ROOT_DIR/.venv" "$RESOURCES_DIR/.venv"
 
-"$ROOT_DIR/.venv/bin/python3" "$ROOT_DIR/Tools/generate_app_icon.py" "$ICONSET_DIR"
-iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/Harmony.icns"
+if [[ ! -f "$ICON_FILE" ]]; then
+  echo "Missing $ICON_FILE. Regenerate it with Tools/generate_app_icon.py." >&2
+  exit 1
+fi
+
+cp "$ICON_FILE" "$RESOURCES_DIR/Harmony.icns"
 
 cat > "$MACOS_DIR/Harmony" <<'EOF'
 #!/bin/zsh
