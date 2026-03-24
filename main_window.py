@@ -1449,18 +1449,10 @@ class MainWindow(QMainWindow):
     
     def _on_delete_from_library(self, track: dict):
         """Handle remove from library request."""
-        reply = QMessageBox.question(
-            self, "Remove from Library",
-            f"Remove '{track.get('title', 'Unknown')}' from your library?\n\n"
-            "The file will not be deleted from disk.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            if track.get('id'):
-                self.db.delete_track(track['id'])
-                self._refresh_current_view()
-                self._update_stats()
+        if track.get('id'):
+            self.db.delete_track(track['id'])
+            self._refresh_current_view()
+            self._update_stats()
     
     def _on_delete_from_disk(self, track: dict):
         """Handle delete from disk request."""

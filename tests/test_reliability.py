@@ -2,12 +2,14 @@ import tempfile
 import unittest
 import json
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from PyQt6.QtWidgets import QApplication
 
 from audio_engine import AudioEngineStub
 from database import MusicDatabase
 from main import TrackListWidget
+from main_window import MainWindow
 from playback_rules import has_meaningful_playback, resolve_playback_queue, should_restore_playback
 
 
@@ -169,6 +171,21 @@ class TrackHighlightTests(unittest.TestCase):
         self.assertEqual(widget.item(1, 0).text(), "▶")
         self.assertTrue(widget.item(1, 2).font().bold())
         self.assertNotEqual(widget.item(1, 2).background().color().alpha(), 0)
+
+
+class LibraryRemovalTests(unittest.TestCase):
+    def test_remove_from_library_skips_confirmation_dialog(self):
+        window = MainWindow.__new__(MainWindow)
+        window.db = Mock()
+        window._refresh_current_view = Mock()
+        window._update_stats = Mock()
+
+        with patch("main_window.QMessageBox.question", side_effect=AssertionError("confirmation should not be shown")):
+            window._on_delete_from_library({"id": 7, "title": "Song"})
+
+        window.db.delete_track.assert_called_once_with(7)
+        window._refresh_current_view.assert_called_once_with()
+        window._update_stats.assert_called_once_with()
 
 
 if __name__ == "__main__":
