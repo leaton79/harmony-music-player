@@ -1,5 +1,7 @@
 # Harmony Music Player
 
+**Notice:** This project was created with the assistance of GenAI tools. It should be carefully reviewed and independently inspected before being used in any production, security-sensitive, or otherwise critical context.
+
 A modern, Spotify-inspired music player for macOS built with Python and PyQt6.
 
 ![Harmony Music Player](https://img.shields.io/badge/Platform-macOS-blue) ![Python](https://img.shields.io/badge/Python-3.12+-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
