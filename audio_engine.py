@@ -8,8 +8,10 @@ from enum import IntEnum
 try:
     import mpv
     MPV_AVAILABLE = True
-except ImportError:
+    MPV_IMPORT_ERROR = None
+except (ImportError, OSError) as e:
     MPV_AVAILABLE = False
+    MPV_IMPORT_ERROR = e
 
 
 class RepeatMode(IntEnum):
@@ -682,5 +684,5 @@ def create_audio_engine():
             print("Falling back to stub engine")
             return AudioEngineStub()
     else:
-        print("mpv not available, using stub engine")
+        print(f"mpv not available, using stub engine: {MPV_IMPORT_ERROR}")
         return AudioEngineStub()

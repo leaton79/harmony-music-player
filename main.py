@@ -251,6 +251,22 @@ class TrackListWidget(QTableWidget):
         """Set tracks to display."""
         self.setSortingEnabled(False)  # Disable while populating
         self.tracks = tracks
+        is_history = any(track.get('history_played_at') or track.get('history_played_at_display') for track in tracks)
+        if is_history:
+            self.setHorizontalHeaderLabels(['Seq', '★', 'Track', 'Artist', 'Played At', 'Album', 'Plays', 'Length'])
+            self.setColumnHidden(3, False)
+            self.setColumnHidden(5, False)
+            self.setColumnWidth(3, 160)
+            self.setColumnWidth(4, 150)
+            self.setColumnWidth(5, 180)
+        else:
+            self.setHorizontalHeaderLabels(['#', '★', 'Track', 'Artist', 'Album', 'Genre', 'Plays', 'Length'])
+            self.setColumnHidden(3, True)
+            self.setColumnHidden(5, True)
+            self.setColumnWidth(3, 0)
+            self.setColumnWidth(4, 180)
+            self.setColumnWidth(5, 0)
+
         self.setRowCount(len(tracks))
         self._track_map.clear()
         
@@ -259,7 +275,7 @@ class TrackListWidget(QTableWidget):
             
             # Track number
             num_item = QTableWidgetItem()
-            num_item.setData(Qt.ItemDataRole.DisplayRole, track.get('track_number') or i + 1)
+            num_item.setData(Qt.ItemDataRole.DisplayRole, track.get('history_sequence') or track.get('track_number') or i + 1)
             num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.setItem(i, 0, num_item)
             
@@ -282,12 +298,12 @@ class TrackListWidget(QTableWidget):
             artist_item = QTableWidgetItem(track.get('artist', 'Unknown'))
             self.setItem(i, 3, artist_item)
             
-            # Album
-            album_item = QTableWidgetItem(track.get('album', 'Unknown'))
+            # Album or history timestamp
+            album_item = QTableWidgetItem(track.get('history_played_at_display') or track.get('album', 'Unknown'))
             self.setItem(i, 4, album_item)
             
-            # Genre
-            genre_item = QTableWidgetItem(track.get('genre', ''))
+            # Genre or album in history mode
+            genre_item = QTableWidgetItem(track.get('album', 'Unknown') if is_history else track.get('genre', ''))
             self.setItem(i, 5, genre_item)
             
             # Play count
@@ -314,10 +330,13 @@ class TrackListWidget(QTableWidget):
         """Apply stronger styling to the currently playing row."""
         self._playing_track_id = track_id
         palette = self.palette()
-        default_text = palette.color(self.foregroundRole())
-        secondary_text = palette.color(self.foregroundRole()).darker(120)
-        active_bg = QColor("#1f3a2a")
+        default_text = palette.color(self.foregroundRole()).darker(135) if track_id else palette.color(self.foregroundRole())
+        secondary_text = palette.color(self.foregroundRole()).darker(170) if track_id else palette.color(self.foregroundRole()).darker(120)
+        active_bg = QColor("#0f6b3f")
         active_text = QColor("#ffffff")
+        active_secondary = QColor("#d8ffe9")
+        base_font = self.font()
+        base_point_size = base_font.pointSize() if base_font.pointSize() > 0 else 13
 
         for row in range(self.rowCount()):
             title_item = self.item(row, 2)
@@ -329,22 +348,20 @@ class TrackListWidget(QTableWidget):
 
             number_item = self.item(row, 0)
             if number_item:
-                display_number = track.get('track_number') or row + 1 if track else row + 1
+                display_number = (track.get('history_sequence') or track.get('track_number') or row + 1) if track else row + 1
                 number_item.setText("▶" if is_playing else str(display_number))
-                font = number_item.font()
-                font.setBold(is_playing)
-                number_item.setFont(font)
 
             for column in range(self.columnCount()):
                 item = self.item(row, column)
                 if not item:
                     continue
-                font = item.font()
+                font = QFont(base_font)
+                font.setPointSize(base_point_size + 1 if is_playing else base_point_size)
                 font.setBold(is_playing and column in (0, 2, 4))
                 item.setFont(font)
                 if is_playing:
                     item.setBackground(active_bg)
-                    item.setForeground(active_text)
+                    item.setForeground(active_text if column in (0, 2, 4) else active_secondary)
                 else:
                     item.setBackground(QColor())
                     if column in (0, 1, 6, 7):
