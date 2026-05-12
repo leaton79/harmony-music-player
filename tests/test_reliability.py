@@ -100,8 +100,14 @@ class MusicDatabaseReliabilityTests(unittest.TestCase):
         self.assertIsNotNone(self.db.get_track(track_id))
 
     def test_playback_state_round_trip_persists_position(self):
+        track_id = self.db.add_track({
+            "file_path": str(Path(self.temp_dir.name) / "state.mp3"),
+            "title": "State Song",
+            "artist": "Artist",
+        })
+
         self.db.save_playback_state(
-            track_id=42,
+            track_id=track_id,
             position=123.5,
             volume=0.7,
             shuffle=True,
@@ -112,13 +118,53 @@ class MusicDatabaseReliabilityTests(unittest.TestCase):
 
         state = self.db.get_playback_state()
 
-        self.assertEqual(state["current_track_id"], 42)
+        self.assertEqual(state["current_track_id"], track_id)
         self.assertEqual(state["position"], 123.5)
         self.assertEqual(state["volume"], 0.7)
         self.assertEqual(state["shuffle"], 1)
         self.assertEqual(state["repeat_mode"], 2)
         self.assertEqual(state["current_view"], "tracks")
         self.assertEqual(state["current_view_data"], json.dumps({"playlist_id": 7}))
+
+    def test_update_play_count_records_ordered_history_entry(self):
+        first_id = self.db.add_track({
+            "file_path": str(Path(self.temp_dir.name) / "first.mp3"),
+            "title": "First",
+            "artist": "Artist",
+        })
+        second_id = self.db.add_track({
+            "file_path": str(Path(self.temp_dir.name) / "second.mp3"),
+            "title": "Second",
+            "artist": "Artist",
+        })
+
+        self.db.update_play_count(first_id)
+        self.db.update_play_count(second_id)
+
+        history = self.db.get_play_history()
+
+        self.assertEqual([row["id"] for row in history], [second_id, first_id])
+        self.assertEqual([row["history_sequence"] for row in history], [2, 1])
+        self.assertTrue(history[0]["history_played_at"])
+
+    def test_clear_play_history_for_named_period_preserves_newer_rows(self):
+        track_id = self.db.add_track({
+            "file_path": str(Path(self.temp_dir.name) / "song.mp3"),
+            "title": "Song",
+            "artist": "Artist",
+        })
+        self.db.update_play_count(track_id)
+
+        removed = self.db.clear_play_history("all")
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.db.get_play_history(), [])
+
+    def test_compute_file_hash_handles_small_files(self):
+        track_path = Path(self.temp_dir.name) / "short.mp3"
+        track_path.write_bytes(b"short file")
+
+        self.assertIsNotNone(self.db.compute_file_hash(str(track_path)))
 
 
 class QueueReliabilityTests(unittest.TestCase):
@@ -171,6 +217,37 @@ class TrackHighlightTests(unittest.TestCase):
         self.assertEqual(widget.item(1, 0).text(), "▶")
         self.assertTrue(widget.item(1, 2).font().bold())
         self.assertNotEqual(widget.item(1, 2).background().color().alpha(), 0)
+
+    def test_set_playing_track_mutes_non_playing_rows_for_stronger_contrast(self):
+        widget = TrackListWidget()
+        widget.set_tracks([
+            {"id": 1, "title": "First", "artist": "Artist A", "album": "Album", "duration": 120},
+            {"id": 2, "title": "Second", "artist": "Artist B", "album": "Album", "duration": 180},
+        ])
+
+        widget.set_playing_track(2)
+
+        self.assertNotEqual(widget.item(0, 2).foreground().color(), widget.item(1, 2).foreground().color())
+        self.assertGreater(widget.item(1, 2).font().pointSize(), widget.item(0, 2).font().pointSize())
+
+    def test_history_rows_use_sequence_and_played_at_columns(self):
+        widget = TrackListWidget()
+        widget.set_tracks([
+            {
+                "id": 1,
+                "title": "Song",
+                "artist": "Artist",
+                "album": "Album",
+                "duration": 120,
+                "history_sequence": 4,
+                "history_played_at_display": "2026-05-12 08:30",
+            },
+        ])
+
+        self.assertEqual(widget.horizontalHeaderItem(0).text(), "Seq")
+        self.assertEqual(widget.horizontalHeaderItem(4).text(), "Played At")
+        self.assertEqual(widget.item(0, 0).text(), "4")
+        self.assertEqual(widget.item(0, 4).text(), "2026-05-12 08:30")
 
 
 class LibraryRemovalTests(unittest.TestCase):

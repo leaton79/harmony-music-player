@@ -6,7 +6,7 @@ Handles SQLite storage, smart playlists, and duplicate detection.
 import sqlite3
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import hashlib
 
@@ -21,6 +21,7 @@ class MusicDatabase:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute('PRAGMA foreign_keys = ON')
         self._init_schema()
     
     def _init_schema(self):
@@ -111,6 +112,15 @@ class MusicDatabase:
                 FOREIGN KEY (current_track_id) REFERENCES tracks(id)
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS play_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            )
+        ''')
         
         # Add current_view column if it doesn't exist (for existing databases)
         try:
@@ -133,6 +143,12 @@ class MusicDatabase:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_hash ON tracks(file_hash)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_date_added ON tracks(date_added)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_play_count ON tracks(play_count)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_last_played ON tracks(last_played)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_starred ON tracks(starred)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_play_history_played_at ON play_history(played_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_play_history_track_id ON play_history(track_id)')
         
         self.conn.commit()
     
@@ -274,12 +290,61 @@ class MusicDatabase:
     def update_play_count(self, track_id: int):
         """Increment play count and update last played time."""
         cursor = self.conn.cursor()
+        played_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('''
             UPDATE tracks 
             SET play_count = play_count + 1, last_played = ?
             WHERE id = ?
-        ''', (datetime.now(), track_id))
+        ''', (played_at, track_id))
+        if cursor.rowcount:
+            cursor.execute(
+                'INSERT INTO play_history (track_id, played_at) VALUES (?, ?)',
+                (track_id, played_at)
+            )
         self.conn.commit()
+
+    def get_play_history(self, limit: int = 500) -> List[Dict]:
+        """Get played tracks in most-recent-first history order."""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT
+                t.*,
+                ph.id AS history_sequence,
+                ph.played_at AS history_played_at,
+                strftime('%Y-%m-%d %H:%M', ph.played_at) AS history_played_at_display
+            FROM play_history ph
+            JOIN tracks t ON t.id = ph.track_id
+            ORDER BY ph.played_at DESC, ph.id DESC
+            LIMIT ?
+        ''', (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def clear_play_history(self, period: str) -> int:
+        """Delete play history rows for a named period and return rows removed."""
+        period_map = {
+            "1 day": timedelta(days=1),
+            "1 week": timedelta(weeks=1),
+            "1 month": timedelta(days=30),
+            "3 months": timedelta(days=90),
+            "6 months": timedelta(days=182),
+            "1 year": timedelta(days=365),
+        }
+
+        cursor = self.conn.cursor()
+        if period == "all":
+            cursor.execute('DELETE FROM play_history')
+        elif period in period_map:
+            cutoff = (datetime.now() - period_map[period]).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute(
+                'DELETE FROM play_history WHERE played_at >= ?',
+                (cutoff,)
+            )
+        else:
+            raise ValueError(f"Unsupported history period: {period}")
+
+        removed = cursor.rowcount
+        self.conn.commit()
+        return removed
     
     def update_track_metadata(self, track_id: int, metadata: Dict) -> bool:
         """Update track metadata."""
@@ -481,11 +546,15 @@ class MusicDatabase:
         """Compute MD5 hash of file for duplicate detection."""
         try:
             hasher = hashlib.md5()
+            file_size = os.path.getsize(file_path)
             with open(file_path, 'rb') as f:
-                # Read first and last 64KB for faster comparison
-                hasher.update(f.read(65536))
-                f.seek(-65536, 2)  # Seek to 64KB before end
-                hasher.update(f.read(65536))
+                if file_size <= 131072:
+                    hasher.update(f.read())
+                else:
+                    # Read first and last 64KB for faster comparison on large files.
+                    hasher.update(f.read(65536))
+                    f.seek(-65536, 2)
+                    hasher.update(f.read(65536))
             return hasher.hexdigest()
         except (IOError, OSError):
             return None

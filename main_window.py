@@ -211,6 +211,16 @@ class MainWindow(QMainWindow):
         self.starred_btn.setObjectName("navButton")
         self.starred_btn.clicked.connect(lambda: self._show_smart_playlist("starred"))
         sidebar_layout.addWidget(self.starred_btn)
+
+        self.history_btn = QPushButton("History")
+        self.history_btn.setObjectName("navButton")
+        self.history_btn.clicked.connect(lambda: self._show_smart_playlist("history"))
+        sidebar_layout.addWidget(self.history_btn)
+
+        self.clear_history_btn = QPushButton("Clear History...")
+        self.clear_history_btn.setObjectName("subtleButton")
+        self.clear_history_btn.clicked.connect(self._clear_play_history)
+        sidebar_layout.addWidget(self.clear_history_btn)
         
         sidebar_layout.addSpacing(12)
         
@@ -755,6 +765,11 @@ class MainWindow(QMainWindow):
             "artists": self.artists_btn,
             "tracks": self.tracks_btn,
             "genres": self.genres_btn,
+            "smart_recent": self.recent_btn,
+            "smart_most_played": self.most_played_btn,
+            "smart_never_played": self.never_played_btn,
+            "smart_starred": self.starred_btn,
+            "smart_history": self.history_btn,
         }
         for name, button in button_map.items():
             button.setProperty("active", name == current_view)
@@ -827,6 +842,10 @@ class MainWindow(QMainWindow):
             tracks = self.db.get_starred_tracks()
             title = "★ Starred"
             subtitle = "Tracks you marked for quick access."
+        elif playlist_type == "history":
+            tracks = self.db.get_play_history()
+            title = "History"
+            subtitle = "Meaningfully played tracks in exact playback order."
         else:
             return
         
@@ -835,6 +854,27 @@ class MainWindow(QMainWindow):
         self._set_content_header("Smart Playlist", title, f"{len(tracks)} tracks. {subtitle}")
         self.tracks_view.set_tracks(tracks)
         self.content_stack.setCurrentWidget(self.tracks_view)
+        self._update_sidebar_selection(f"smart_{playlist_type}")
+
+    def _clear_play_history(self):
+        """Clear play history for a user-selected period."""
+        options = ["1 day", "1 week", "1 month", "3 months", "6 months", "1 year", "All"]
+        period, ok = QInputDialog.getItem(
+            self,
+            "Clear History",
+            "Delete history from:",
+            options,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        normalized_period = period.lower()
+        removed = self.db.clear_play_history(normalized_period)
+        if self.current_view == "smart_playlist" and self.current_view_data.get("playlist_type") == "history":
+            self._show_smart_playlist("history")
+        QMessageBox.information(self, "History Cleared", f"Deleted {removed} history entr{'y' if removed == 1 else 'ies'}.")
     
     def _on_album_clicked(self, album_info: dict):
         """Handle album card click - show album detail."""
@@ -1394,6 +1434,8 @@ class MainWindow(QMainWindow):
         if has_meaningful_playback(position, duration):
             self.db.update_play_count(track['id'])
             self._play_counted_for_current_track = True
+            if self.current_view == "smart_playlist" and self.current_view_data.get("playlist_type") == "history":
+                self._show_smart_playlist("history")
 
     def _ensure_playback_queue_for_current_track(self):
         """Expand a single-track restored session into a usable queue when possible."""
@@ -1482,6 +1524,12 @@ class MainWindow(QMainWindow):
     
     def _refresh_current_view(self):
         """Refresh the current view."""
+        if self.current_view == "smart_playlist":
+            playlist_type = self.current_view_data.get("playlist_type")
+            if playlist_type:
+                self._show_smart_playlist(playlist_type)
+            return
+
         if self.current_view:
             self._show_view(self.current_view)
     
